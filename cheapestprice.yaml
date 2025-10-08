@@ -227,10 +227,10 @@ action:
           
           {# Check if we're in minimum on duration #}
           {% set enforce_min = false %}
-          {% if helper_var != "" %}
+          {% if helper_var != "" and helper_var != None %}
             {% set device_on = is_state(helper_var, 'on') %}
-            {% set last_changed = as_timestamp(states[helper_var].last_changed) %}
-            {% set minutes_on = ((as_timestamp(now()) - last_changed) / 60) | int %}
+            {% set last_changed = as_timestamp(states[helper_var].last_changed) if helper_var in states else 0 %}
+            {% set minutes_on = ((as_timestamp(now()) - last_changed) / 60) | int if last_changed > 0 else 0 %}
             {% set periods_on = minutes_on // 15 %}
             {% set enforce_min = device_on and periods_on < min_duration_var | int %}
           {% endif %}
@@ -259,24 +259,6 @@ action:
           
           {{ should_be_on }}
       
-      sequence: 
-        - choose:
-          - conditions:
-            - condition: template
-              value_template: "{{ helper_var != '' }}"
-            sequence:
-              - service: input_boolean.turn_on
-                data:
-                  entity_id: "{{ helper_var }}"
-        - parallel: !input turnon
+      sequence: !input turnon
     
-    default:
-      - choose:
-        - conditions:
-          - condition: template
-            value_template: "{{ helper_var != '' }}"
-          sequence:
-            - service: input_boolean.turn_off
-              data:
-                entity_id: "{{ helper_var }}"
-      - parallel: !input turnoff
+    default: !input turnoff
