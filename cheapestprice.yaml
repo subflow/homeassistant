@@ -266,11 +266,9 @@ action:
               value_template: "{{ helper_var != '' }}"
             sequence:
               - service: input_boolean.turn_on
-                target:
-                  entity_id: !input helper_input
-        - choose:
-          - conditions: []
-            sequence: !input turnon
+                data:
+                  entity_id: "{{ helper_var }}"
+        - parallel: !input turnon
     
     default:
       - choose:
@@ -279,8 +277,6 @@ action:
             value_template: "{{ helper_var != '' }}"
           sequence:
             - service: input_boolean.turn_off
-              target:
-                entity_id: !input helper_input
-      - choose:
-        - conditions: []
-          sequence: !input turnoff
+              data:
+                entity_id: "{{ helper_var }}"
+      - parallel: !input turnoff
