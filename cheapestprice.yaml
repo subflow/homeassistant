@@ -1,0 +1,278 @@
+blueprint:
+  name: Nordpool 15-minute price based control
+  description: This blueprint uses the Nordpool integration with 15-minute pricing intervals to control devices based on electricity prices, turning them on during the cheapest periods.
+  domain: automation
+  input:
+    grid_area:
+      name: Grid area sensor
+      description: This is your grid area sensor
+      selector:
+        entity:
+          domain:
+          - sensor
+          integration: nordpool
+          multiple: false
+    
+    check_interval:
+      name: Check interval (minutes)
+      description: How often to check prices (15, 30, or 60 minutes)
+      default: 15
+      selector:
+        select:
+          options:
+            - "15"
+            - "30"
+            - "60"
+    
+    start_minute:
+      name: Start minute
+      description: Set the minute in hour to start checking (0, 15, 30, or 45 for 15-min intervals)
+      default: 0
+      selector:
+        number:
+          min: 0.0
+          max: 45.0
+          mode: slider
+          step: 15.0
+    
+    periods_on:
+      name: Periods on per day
+      description: Number of 15-minute periods per day that devices should be on (96 = full day)
+      default: 48
+      selector:
+        number:
+          min: 0.0
+          max: 96.0
+          mode: slider
+          step: 1.0
+    
+    price_ratio:
+      name: Price percent threshold
+      description: Max percent between minimum and maximum price of the day to turn on devices
+      default: 50
+      selector:
+        number:
+          min: 0.0
+          max: 100.0
+          mode: slider
+          step: 5.0
+    
+    smoothing_periods:
+      name: Smoothing periods
+      description: Number of consecutive 15-min periods to average for smoother switching (1 = no smoothing)
+      default: 2
+      selector:
+        number:
+          min: 1.0
+          max: 8.0
+          mode: slider
+          step: 1.0
+    
+    min_on_duration:
+      name: Minimum on duration
+      description: Minimum consecutive 15-min periods to keep device on (reduces switching)
+      default: 2
+      selector:
+        number:
+          min: 1.0
+          max: 8.0
+          mode: slider
+          step: 1.0
+    
+    always_on:
+      name: Always on price
+      description: If the price is below this, the device is always on (ignoring other conditions)
+      default: 0.0
+      selector:
+        number:
+          min: 0.0
+          max: 20.0
+          mode: slider
+          step: 0.1
+    
+    always_off:
+      name: Always off price
+      description: If the price is above this, the device is always off (ignoring other conditions)
+      default: 20
+      selector:
+        number:
+          min: 0.0
+          max: 20.0
+          mode: slider
+          step: 0.1
+    
+    price_forecast_hours:
+      name: Price forecast look-ahead
+      description: Hours ahead to consider when determining if current price is good (0 = only current day)
+      default: 4
+      selector:
+        number:
+          min: 0.0
+          max: 24.0
+          mode: slider
+          step: 1.0
+    
+    turnon:
+      name: Turn On Actions
+      description: Actions to run to turn on devices
+      default: []
+      selector:
+        action: {}
+    
+    turnoff:
+      name: Turn Off Actions
+      description: Actions to run to turn off devices
+      default: []
+      selector:
+        action: {}
+    
+    helper_input:
+      name: Helper input (optional)
+      description: Input boolean to track device state for minimum duration enforcement
+      default: ""
+      selector:
+        entity:
+          domain:
+          - input_boolean
+          multiple: false
+
+variables:
+  grid_area_var: !input grid_area
+  periods_on_var: !input periods_on
+  price_ratio_var: !input price_ratio
+  always_on_var: !input always_on
+  always_off_var: !input always_off
+  start_minute_var: !input start_minute
+  check_interval_var: !input check_interval
+  smoothing_var: !input smoothing_periods
+  min_duration_var: !input min_on_duration
+  forecast_hours_var: !input price_forecast_hours
+  helper_var: !input helper_input
+
+trigger:
+  - platform: time_pattern
+    minutes: "/15"  # Trigger every 15 minutes
+  - platform: state
+    entity_id: !input grid_area
+    attribute: today
+  - platform: state
+    entity_id: !input grid_area
+    attribute: tomorrow
+
+condition:
+  - condition: template
+    value_template: >-
+      {% set minute = now().minute %}
+      {% set interval = check_interval_var | int %}
+      {{ minute % interval == start_minute_var | int }}
+
+action:
+  - choose:
+    - conditions:
+      - condition: template
+        value_template: >-
+          {# Get current time info #}
+          {% set current_hour = now().hour %}
+          {% set current_minute = now().minute %}
+          {% set current_period = (current_hour * 4) + (current_minute // 15) %}
+          
+          {# Get price data - assuming 15-minute intervals #}
+          {% set prices_today = state_attr(grid_area_var, 'today') | list %}
+          {% set prices_tomorrow = state_attr(grid_area_var, 'tomorrow') | list %}
+          
+          {# Handle both hourly and 15-minute data formats #}
+          {% if prices_today | length == 24 %}
+            {# Still hourly data - expand to 15-min intervals #}
+            {% set prices_15min = namespace(values=[]) %}
+            {% for price in prices_today %}
+              {% for i in range(4) %}
+                {% set prices_15min.values = prices_15min.values + [price] %}
+              {% endfor %}
+            {% endfor %}
+            {% set prices_today = prices_15min.values %}
+          {% endif %}
+          
+          {# Get current price with smoothing #}
+          {% set smoothing_periods = smoothing_var | int %}
+          {% set price_sum = 0 %}
+          {% set count = 0 %}
+          {% for i in range(smoothing_periods) %}
+            {% set idx = current_period + i %}
+            {% if idx < prices_today | length %}
+              {% set price_sum = price_sum + prices_today[idx] %}
+              {% set count = count + 1 %}
+            {% endif %}
+          {% endfor %}
+          {% set current_price = price_sum / count if count > 0 else prices_today[current_period] %}
+          
+          {# Consider forecast period for comparison #}
+          {% set comparison_prices = prices_today %}
+          {% if forecast_hours_var | int > 0 and prices_tomorrow %}
+            {% set periods_ahead = (forecast_hours_var | int) * 4 %}
+            {% set future_prices = prices_today[current_period:] + prices_tomorrow[:periods_ahead] %}
+            {% set comparison_prices = future_prices if future_prices | length > 0 else prices_today %}
+          {% endif %}
+          
+          {# Calculate price statistics #}
+          {% set sorted_prices = comparison_prices | sort %}
+          {% set min_price = sorted_prices[0] %}
+          {% set max_price = sorted_prices[-1] %}
+          {% set price_diff = max_price - min_price %}
+          {% set price_above_min = current_price - min_price %}
+          {% set ratio = (price_above_min / price_diff * 100) | round if price_diff > 0 else 0 %}
+          
+          {# Calculate rank among all periods #}
+          {% set all_sorted = prices_today | sort %}
+          {% set rank = all_sorted.index(prices_today[current_period]) + 1 %}
+          
+          {# Check if we're in minimum on duration #}
+          {% set enforce_min = false %}
+          {% if helper_var != "" %}
+            {% set device_on = is_state(helper_var, 'on') %}
+            {% set last_changed = as_timestamp(states[helper_var].last_changed) %}
+            {% set minutes_on = ((as_timestamp(now()) - last_changed) / 60) | int %}
+            {% set periods_on = minutes_on // 15 %}
+            {% set enforce_min = device_on and periods_on < min_duration_var | int %}
+          {% endif %}
+          
+          {# Decision logic #}
+          {% set should_be_on = false %}
+          
+          {# Always on condition #}
+          {% if current_price <= always_on_var | float %}
+            {% set should_be_on = true %}
+          
+          {# Always off condition #}
+          {% elif current_price >= always_off_var | float %}
+            {% set should_be_on = false %}
+          
+          {# Enforce minimum duration #}
+          {% elif enforce_min %}
+            {% set should_be_on = true %}
+          
+          {# Normal operation based on rank and ratio #}
+          {% else %}
+            {% set rank_threshold = periods_on_var | int %}
+            {% set ratio_threshold = price_ratio_var | int %}
+            {% set should_be_on = rank <= rank_threshold or ratio <= ratio_threshold %}
+          {% endif %}
+          
+          {{ should_be_on }}
+      
+      sequence: 
+        - service: input_boolean.turn_on
+          target:
+            entity_id: !input helper_input
+          continue_on_error: true
+        - choose:
+          - conditions: []
+            sequence: !input turnon
+    
+    default:
+      - service: input_boolean.turn_off
+        target:
+          entity_id: !input helper_input
+        continue_on_error: true
+      - choose:
+        - conditions: []
+          sequence: !input turnoff
