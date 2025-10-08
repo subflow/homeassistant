@@ -260,19 +260,27 @@ action:
           {{ should_be_on }}
       
       sequence: 
-        - service: input_boolean.turn_on
-          target:
-            entity_id: !input helper_input
-          continue_on_error: true
+        - choose:
+          - conditions:
+            - condition: template
+              value_template: "{{ helper_var != '' }}"
+            sequence:
+              - service: input_boolean.turn_on
+                target:
+                  entity_id: !input helper_input
         - choose:
           - conditions: []
             sequence: !input turnon
     
     default:
-      - service: input_boolean.turn_off
-        target:
-          entity_id: !input helper_input
-        continue_on_error: true
+      - choose:
+        - conditions:
+          - condition: template
+            value_template: "{{ helper_var != '' }}"
+          sequence:
+            - service: input_boolean.turn_off
+              target:
+                entity_id: !input helper_input
       - choose:
         - conditions: []
           sequence: !input turnoff
