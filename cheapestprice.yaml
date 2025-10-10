@@ -221,16 +221,16 @@ action:
           {% set price_above_min = current_price - min_price %}
           {% set ratio = (price_above_min / price_diff * 100) | round if price_diff > 0 else 0 %}
           
-          {# Calculate rank among all periods #}
+          {# Calculate rank among all periods - count how many are cheaper #}
           {% set current_period_price = prices_today[current_period] %}
-          {% set all_sorted = prices_today | sort %}
-          {% set rank = 0 %}
-          {% for price in all_sorted %}
+          {% set cheaper_count = 0 %}
+          {% for price in prices_today %}
             {% if price < current_period_price %}
-              {% set rank = rank + 1 %}
+              {% set cheaper_count = cheaper_count + 1 %}
             {% endif %}
           {% endfor %}
-          {% set rank = rank + 1 %}
+          {# Rank is position from cheapest, so cheaper_count + 1 #}
+          {% set rank = cheaper_count + 1 %}
           
           {# Check if we're in minimum on duration #}
           {% set enforce_min = false %}
