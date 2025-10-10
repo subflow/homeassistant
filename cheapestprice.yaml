@@ -222,8 +222,15 @@ action:
           {% set ratio = (price_above_min / price_diff * 100) | round if price_diff > 0 else 0 %}
           
           {# Calculate rank among all periods #}
+          {% set current_period_price = prices_today[current_period] %}
           {% set all_sorted = prices_today | sort %}
-          {% set rank = all_sorted.index(prices_today[current_period]) + 1 %}
+          {% set rank = 0 %}
+          {% for price in all_sorted %}
+            {% if price < current_period_price %}
+              {% set rank = rank + 1 %}
+            {% endif %}
+          {% endfor %}
+          {% set rank = rank + 1 %}
           
           {# Check if we're in minimum on duration #}
           {% set enforce_min = false %}
