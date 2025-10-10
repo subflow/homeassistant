@@ -171,10 +171,22 @@ action:
     - conditions:
       - condition: template
         value_template: >-
-          {# Get current time info #}
+          {# Get current time info - adjust for Nordpool showing last completed period #}
           {% set current_hour = now().hour %}
           {% set current_minute = now().minute %}
-          {% set current_period = (current_hour * 4) + (current_minute // 15) %}
+          {# Calculate which 15-min period we're in (0-3 within each hour) #}
+          {% set quarter = current_minute // 15 %}
+          {# Nordpool shows price of last COMPLETED period, not current #}
+          {% if quarter == 0 and current_hour > 0 %}
+            {# First 15 mins of hour uses last period of previous hour #}
+            {% set current_period = ((current_hour - 1) * 4) + 3 %}
+          {% elif quarter > 0 %}
+            {# Use previous quarter within same hour #}
+            {% set current_period = (current_hour * 4) + (quarter - 1) %}
+          {% else %}
+            {# Midnight edge case #}
+            {% set current_period = 0 %}
+          {% endif %}
           
           {# Get price data - assuming 15-minute intervals #}
           {% set prices_today = state_attr(grid_area_var, 'today') | list %}
